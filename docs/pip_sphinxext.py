@@ -222,6 +222,13 @@ class PipReqFileOptionsReference(PipOptions):
         raise KeyError(f"Could not identify prefix of opt {opt_name}")
 
     def process_options(self) -> None:
+        # Emit one MyST bullet per option, so each option is extracted as
+        # its own well-formed gettext message with a valid file:line
+        # location. MyST ``{ref}`` syntax (rather than RST ``:ref:``) is
+        # required because this directive is used in a Markdown document,
+        # and translated catalogs are re-parsed as MyST.
+        source = self.state.document.current_source
+        offset = 0
         for option in SUPPORTED_OPTIONS:
             if getattr(option, "deprecated", False):
                 continue
@@ -229,19 +236,34 @@ class PipReqFileOptionsReference(PipOptions):
             opt = option()
             opt_name = opt._long_opts[0]
             if opt._short_opts:
-                short_opt_name = f"{opt._short_opts[0]}, "
+                label = f"{opt._short_opts[0]}, {opt_name}"
             else:
-                short_opt_name = ""
+                label = opt_name
 
             if option in cmdoptions.general_group["options"]:
                 prefix = ""
             else:
                 prefix = f"{self.determine_opt_prefix(opt_name)}_"
 
+            self.view_list.append("", source, offset)
+            offset += 1
             self.view_list.append(
-                f"*  :ref:`{short_opt_name}{opt_name}<{prefix}{opt_name}>`",
-                "\n",
+                f"- {{ref}}`{label} <{prefix}{opt_name}>`",
+                source,
+                offset,
             )
+            offset += 1
+        self.view_list.append("", source, offset)
+
+    def run(self) -> list[nodes.Node]:
+        # Parse into a transparent container (not a paragraph) so the
+        # whole list is not also extracted as a single merged message.
+        node = nodes.container()
+        node.document = self.state.document
+        self.view_list = ViewList()
+        self.process_options()
+        self.state.nested_parse(self.view_list, 0, node)
+        return [node]
 
 
 class PipCLIDirective(rst.Directive):
